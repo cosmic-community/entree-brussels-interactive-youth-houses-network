@@ -3,228 +3,191 @@
 import { useEffect, useRef } from 'react'
 import { YouthHouse, SiteSettings } from '@/types'
 
-interface InteractiveMapProps {
+export interface InteractiveMapProps {
   youthHouses: YouthHouse[]
+  siteSettings: SiteSettings | null
 }
 
-export default function InteractiveMap({ youthHouses }: InteractiveMapProps) {
+export default function InteractiveMap({ youthHouses, siteSettings }: InteractiveMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
-
+  
   useEffect(() => {
-    // Check if Mapbox GL is available and we have an access token
-    const accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+    // Check if we have access token
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
     
-    if (!accessToken || accessToken === 'pk.test') {
-      console.warn('Mapbox access token not configured properly')
+    if (!mapboxToken || mapboxToken === 'pk.test') {
+      // Show fallback when no valid Mapbox token
       return
     }
-
-    // Dynamically import Mapbox GL to avoid SSR issues
-    import('mapbox-gl').then((mapboxgl) => {
-      if (!mapContainer.current || map.current) return
-
-      mapboxgl.default.accessToken = accessToken
-
-      map.current = new mapboxgl.default.Map({
-        container: mapContainer.current,
+    
+    // Only initialize map if we have a valid token and container
+    if (!mapContainer.current || map.current) return
+    
+    // Dynamically import Mapbox GL
+    import('mapbox-gl').then(({ default: mapboxgl }) => {
+      mapboxgl.accessToken = mapboxToken
+      
+      // Get map center from site settings or use default Brussels coordinates
+      const centerLat = siteSettings?.metadata?.map_center_lat ? 
+        parseFloat(siteSettings.metadata.map_center_lat) : 50.8476
+      const centerLng = siteSettings?.metadata?.map_center_lng ? 
+        parseFloat(siteSettings.metadata.map_center_lng) : 4.3572
+      const zoom = siteSettings?.metadata?.map_zoom || 12
+      
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current!,
         style: 'mapbox://styles/mapbox/light-v11',
-        center: [4.3572, 50.8476], // Brussels center
-        zoom: 12,
-        attributionControl: false,
+        center: [centerLng, centerLat],
+        zoom: zoom
       })
-
-      map.current.addControl(new mapboxgl.default.NavigationControl(), 'top-right')
-
-      map.current.on('load', () => {
-        // Add markers for each youth house
-        youthHouses.forEach((house) => {
-          if (!house.metadata.latitude || !house.metadata.longitude) return
-
-          const lat = parseFloat(house.metadata.latitude)
-          const lng = parseFloat(house.metadata.longitude)
-
-          if (isNaN(lat) || isNaN(lng)) return
-
+      
+      // Add markers for each youth house
+      youthHouses.forEach((youthHouse) => {
+        if (youthHouse.metadata?.latitude && youthHouse.metadata?.longitude) {
+          const lat = parseFloat(youthHouse.metadata.latitude)
+          const lng = parseFloat(youthHouse.metadata.longitude)
+          
           // Create custom marker element
-          const markerElement = document.createElement('div')
-          markerElement.className = 'custom-marker'
-          markerElement.innerHTML = `
-            <div class="marker-inner">
-              <div class="marker-icon">🏠</div>
-            </div>
+          const markerEl = document.createElement('div')
+          markerEl.className = 'custom-marker'
+          markerEl.style.cssText = `
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(135deg, #FF6B35 0%, #4ECDC4 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease;
           `
-
+          
+          // Add hover effect
+          markerEl.addEventListener('mouseenter', () => {
+            markerEl.style.transform = 'scale(1.2)'
+          })
+          markerEl.addEventListener('mouseleave', () => {
+            markerEl.style.transform = 'scale(1)'
+          })
+          
           // Create popup content
           const popupContent = `
-            <div class="map-popup">
-              <h3 class="popup-title">${house.metadata.name}</h3>
-              ${house.metadata.description ? `<div class="popup-description">${house.metadata.description.replace(/<[^>]*>/g, '').substring(0, 100)}...</div>` : ''}
-              <div class="popup-details">
-                ${house.metadata.phone ? `<div class="popup-phone">📞 ${house.metadata.phone}</div>` : ''}
-                ${house.metadata.email ? `<div class="popup-email">✉️ ${house.metadata.email}</div>` : ''}
-              </div>
-              <a href="/youth-houses/${house.slug}" class="popup-link">Learn More</a>
+            <div style="padding: 12px; min-width: 200px;">
+              <h3 style="margin: 0 0 8px 0; color: #2D3436; font-size: 16px; font-weight: bold;">
+                ${youthHouse.metadata.name || youthHouse.title}
+              </h3>
+              ${youthHouse.metadata.neighborhood ? 
+                `<p style="margin: 0 0 8px 0; color: #636e72; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+                  ${youthHouse.metadata.neighborhood}
+                </p>` : ''
+              }
+              ${youthHouse.metadata.address ? 
+                `<p style="margin: 0 0 8px 0; color: #636e72; font-size: 14px; line-height: 1.4;">
+                  ${youthHouse.metadata.address.replace(/\n/g, '<br>')}
+                </p>` : ''
+              }
+              ${youthHouse.metadata.age_range ? 
+                `<p style="margin: 0 0 12px 0; color: #00b894; font-size: 14px; font-weight: 500;">
+                  Ages: ${youthHouse.metadata.age_range}
+                </p>` : ''
+              }
+              <a href="/youth-houses/${youthHouse.slug}" 
+                 style="display: inline-block; background: linear-gradient(135deg, #FF6B35 0%, #4ECDC4 100%); 
+                        color: white; padding: 6px 12px; border-radius: 6px; text-decoration: none; 
+                        font-size: 12px; font-weight: 500; transition: transform 0.2s ease;">
+                Learn More
+              </a>
             </div>
           `
-
-          const popup = new mapboxgl.default.Popup({ offset: 25 }).setHTML(popupContent)
-
-          new mapboxgl.default.Marker(markerElement)
+          
+          const popup = new mapboxgl.Popup({ 
+            offset: 25,
+            closeButton: true,
+            closeOnClick: false
+          }).setHTML(popupContent)
+          
+          // Add marker to map
+          new mapboxgl.Marker(markerEl)
             .setLngLat([lng, lat])
             .setPopup(popup)
             .addTo(map.current)
-        })
+        }
       })
     }).catch((error) => {
       console.error('Error loading Mapbox GL:', error)
     })
-
+    
     return () => {
       if (map.current) {
         map.current.remove()
-        map.current = null
       }
     }
-  }, [youthHouses])
+  }, [youthHouses, siteSettings])
+
+  // Check if we have access token
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+  
+  if (!mapboxToken || mapboxToken === 'pk.test') {
+    return (
+      <div className="h-96 bg-gray-100 rounded-2xl flex items-center justify-center">
+        <div className="text-center p-8">
+          <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-white text-2xl">📍</span>
+          </div>
+          <h3 className="text-xl font-semibold text-dark mb-2">Interactive Map</h3>
+          <p className="text-gray-600 mb-4 max-w-sm">
+            Map functionality requires a Mapbox access token. 
+            Please configure your environment variables to view the interactive map.
+          </p>
+          <div className="grid gap-2 max-w-md">
+            {youthHouses.map((house, index) => (
+              <div key={house.id} className="text-left p-3 bg-white rounded-lg shadow-sm">
+                <h4 className="font-medium text-dark">{house.metadata?.name || house.title}</h4>
+                {house.metadata?.neighborhood && (
+                  <p className="text-sm text-gray-500">{house.metadata.neighborhood}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative">
-      {/* Map Styles */}
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          .mapboxgl-popup {
-            max-width: 300px;
-          }
-          
-          .mapboxgl-popup-content {
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-            border: none;
-            padding: 0;
-            overflow: hidden;
-          }
-          
-          .mapboxgl-popup-tip {
-            border-top-color: #ffffff;
-          }
-          
-          .custom-marker {
-            width: 40px;
-            height: 40px;
-            cursor: pointer;
-            transform: translate(-50%, -100%);
-            z-index: 1;
-          }
-          
-          .marker-inner {
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #FF6B35, #4ECDC4);
-            border-radius: 50% 50% 50% 0;
-            transform: rotate(-45deg);
-            border: 3px solid white;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.3s ease;
-          }
-          
-          .custom-marker:hover .marker-inner {
-            transform: rotate(-45deg) scale(1.1);
-          }
-          
-          .marker-icon {
-            transform: rotate(45deg);
-            font-size: 16px;
-          }
-          
-          .map-popup {
-            padding: 20px;
-            background: white;
-          }
-          
-          .popup-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #2D3436;
-            margin-bottom: 12px;
-            line-height: 1.3;
-          }
-          
-          .popup-description {
-            font-size: 14px;
-            color: #636e72;
-            margin-bottom: 16px;
-            line-height: 1.5;
-          }
-          
-          .popup-details {
-            margin-bottom: 16px;
-          }
-          
-          .popup-phone,
-          .popup-email {
-            font-size: 13px;
-            color: #2d3436;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-          }
-          
-          .popup-link {
-            display: inline-block;
-            background: linear-gradient(135deg, #FF6B35, #4ECDC4);
-            color: white;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            transition: opacity 0.3s ease;
-          }
-          
-          .popup-link:hover {
-            opacity: 0.9;
-          }
-          
-          .mapboxgl-ctrl-bottom-left,
-          .mapboxgl-ctrl-bottom-right {
-            display: none;
-          }
-          
-          .mapboxgl-canvas {
-            border-radius: 16px;
-          }
-        `
-      }} />
-
-      {/* Map Container */}
-      <div 
-        ref={mapContainer} 
-        className="w-full h-96 md:h-[500px] rounded-2xl overflow-hidden shadow-2xl"
-        style={{ minHeight: '400px' }}
-      />
-
-      {/* Map overlay with stats */}
-      <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-xl p-4 shadow-lg">
-        <div className="text-sm font-medium text-dark">
-          {youthHouses.length} Youth Houses
-        </div>
-        <div className="text-xs text-gray-600">
-          Click markers for details
-        </div>
-      </div>
-
-      {/* Loading state overlay */}
-      <div className="absolute inset-0 bg-gray-100 rounded-2xl flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading map...</p>
-        </div>
-      </div>
+      <div ref={mapContainer} className="h-96 rounded-2xl overflow-hidden shadow-2xl" />
+      
+      {/* Map overlay with custom styles */}
+      <style jsx>{`
+        .mapboxgl-popup-content {
+          padding: 0 !important;
+          border-radius: 12px !important;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+          border: none !important;
+        }
+        .mapboxgl-popup-tip {
+          border-top-color: white !important;
+        }
+        .mapboxgl-popup-close-button {
+          font-size: 18px !important;
+          padding: 8px !important;
+          color: #636e72 !important;
+        }
+        .mapboxgl-popup-close-button:hover {
+          background: #f1f2f6 !important;
+          border-radius: 50% !important;
+        }
+        .mapboxgl-ctrl-attrib {
+          display: none !important;
+        }
+        .mapboxgl-ctrl-logo {
+          display: none !important;
+        }
+      `}</style>
     </div>
   )
 }
