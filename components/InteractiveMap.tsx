@@ -1,164 +1,290 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { YouthHouse, SiteSettings } from '@/types'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
+import { YouthHouse } from '@/types'
+
+// Set Mapbox access token
+mapboxgl.accessToken = 'pk.eyJ1IjoiZW50cmVlYnJ1c3NlbHMiLCJhIjoiY2x1eGJ5M3p5MDJ5cDJrbzM0YW84ZGQzdiJ9.X8f_123456789'
 
 interface InteractiveMapProps {
   youthHouses: YouthHouse[]
-  siteSettings: SiteSettings | null
+  centerLat?: string
+  centerLng?: string
+  zoom?: number
 }
 
-export default function InteractiveMap({ youthHouses, siteSettings }: InteractiveMapProps) {
-  const mapRef = useRef<HTMLDivElement>(null)
-  const [map, setMap] = useState<any>(null)
-  const [isMapLoaded, setIsMapLoaded] = useState(false)
+export default function InteractiveMap({ 
+  youthHouses, 
+  centerLat = '50.8476', 
+  centerLng = '4.3572', 
+  zoom = 12 
+}: InteractiveMapProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<mapboxgl.Map | null>(null)
+  const [isLoaded, setIsLoaded] = useState(false)
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !mapRef.current) return
-
-    const initializeMap = async () => {
-      try {
-        // Dynamic import for Leaflet to ensure it only loads on client side
-        const L = (await import('leaflet')).default
-
-        // Fix for default markers in production
-        delete (L.Icon.Default.prototype as any)._getIconUrl
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-        })
-
-        // Get map center from settings or default to Brussels
-        const centerLat = parseFloat(siteSettings?.metadata?.map_center_lat || '50.8476')
-        const centerLng = parseFloat(siteSettings?.metadata?.map_center_lng || '4.3572')
-        const zoomLevel = siteSettings?.metadata?.map_zoom || 12
-
-        const mapInstance = L.map(mapRef.current).setView([centerLat, centerLng], zoomLevel)
-
-        // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors'
-        }).addTo(mapInstance)
-
-        // Custom marker HTML
-        const createCustomIcon = (color: string) => {
-          return L.divIcon({
-            html: `
-              <div class="relative">
-                <div class="w-6 h-6 bg-${color} rounded-full border-4 border-white shadow-lg animate-bounce-gentle" style="background-color: ${
-                  color === 'primary' ? '#FF6B35' : 
-                  color === 'secondary' ? '#4ECDC4' : '#FFE66D'
-                }"></div>
-                <div class="absolute top-0 left-0 w-6 h-6 bg-${color} rounded-full opacity-50 animate-ping" style="background-color: ${
-                  color === 'primary' ? '#FF6B35' : 
-                  color === 'secondary' ? '#4ECDC4' : '#FFE66D'
-                }"></div>
-              </div>
-            `,
-            className: 'custom-marker',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          })
-        }
-
-        // Add markers for youth houses
-        youthHouses.forEach((house, index) => {
-          if (!house.metadata?.latitude || !house.metadata?.longitude) return
-
-          const lat = parseFloat(house.metadata.latitude)
-          const lng = parseFloat(house.metadata.longitude)
-          
-          if (isNaN(lat) || isNaN(lng)) return
-
-          const colors = ['primary', 'secondary', 'accent']
-          const color = colors[index % colors.length]
-          
-          const marker = L.marker([lat, lng], {
-            icon: createCustomIcon(color)
-          }).addTo(mapInstance)
-
-          // Create popup content
-          const popupContent = `
-            <div class="p-4 max-w-xs">
-              <h3 class="font-bold text-lg text-dark mb-2">${house.metadata.name}</h3>
-              ${house.metadata.neighborhood ? `<p class="text-sm text-gray-600 mb-2">📍 ${house.metadata.neighborhood}</p>` : ''}
-              ${house.metadata.age_range ? `<p class="text-sm text-gray-600 mb-3">👥 Ages: ${house.metadata.age_range}</p>` : ''}
-              ${house.metadata.description ? `<p class="text-sm text-gray-700 mb-3 line-clamp-3">${house.metadata.description.replace(/<[^>]*>/g, '').substring(0, 120)}...</p>` : ''}
-              <a href="/youth-houses/${house.slug}" 
-                 class="inline-block bg-primary text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-opacity-90 transition-all duration-300">
-                Learn More →
-              </a>
-            </div>
-          `
-
-          marker.bindPopup(popupContent, {
-            maxWidth: 300,
-            className: 'custom-popup'
-          })
-
-          // Add hover effect
-          marker.on('mouseover', function() {
-            this.openPopup()
-          })
-        })
-
-        setMap(mapInstance)
-        setIsMapLoaded(true)
-
-        // Cleanup function
-        return () => {
-          mapInstance.remove()
-        }
-      } catch (error) {
-        console.error('Error initializing map:', error)
-      }
+    // Ensure map container exists before initializing
+    if (!mapContainerRef.current) {
+      console.error('Map container ref is null')
+      return
     }
 
-    initializeMap()
-  }, [youthHouses, siteSettings])
+    // Initialize map
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current, // Now guaranteed to be non-null
+      style: 'mapbox://styles/mapbox/light-v11',
+      center: [parseFloat(centerLng), parseFloat(centerLat)],
+      zoom: zoom,
+      attributionControl: false
+    })
+
+    mapRef.current = map
+
+    // Add custom controls
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right')
+    map.addControl(new mapboxgl.AttributionControl({
+      compact: true,
+      customAttribution: '© Entree Brussels'
+    }), 'bottom-right')
+
+    map.on('load', () => {
+      setIsLoaded(true)
+      
+      // Add markers for each youth house
+      youthHouses.forEach((youthHouse) => {
+        if (!youthHouse.metadata?.latitude || !youthHouse.metadata?.longitude) {
+          console.warn(`Youth house ${youthHouse.title} missing coordinates`)
+          return
+        }
+
+        // Create popup content with null checks
+        const popupContent = createPopupContent(youthHouse)
+        
+        // Create popup
+        const popup = new mapboxgl.Popup({ 
+          offset: 25,
+          closeButton: true,
+          closeOnClick: false
+        }).setHTML(popupContent) // popupContent is now guaranteed to be a string
+
+        // Create custom marker element
+        const markerElement = document.createElement('div')
+        markerElement.className = 'custom-marker'
+        markerElement.innerHTML = `
+          <div class="marker-pulse"></div>
+          <div class="marker-content">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#FF6B35"/>
+              <circle cx="12" cy="9" r="2.5" fill="white"/>
+            </svg>
+          </div>
+        `
+
+        // Add click handler with proper typing
+        markerElement.addEventListener('click', function(this: HTMLDivElement, e: MouseEvent) {
+          e.stopPropagation()
+          // Toggle popup visibility
+          if (popup.isOpen()) {
+            popup.remove()
+          } else {
+            popup.addTo(map)
+          }
+        })
+
+        // Create marker
+        new mapboxgl.Marker(markerElement)
+          .setLngLat([
+            parseFloat(youthHouse.metadata.longitude),
+            parseFloat(youthHouse.metadata.latitude)
+          ])
+          .setPopup(popup)
+          .addTo(map)
+      })
+    })
+
+    // Cleanup function
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove()
+      }
+    }
+  }, [youthHouses, centerLat, centerLng, zoom])
+
+  // Helper function to create popup content with proper typing
+  function createPopupContent(youthHouse: YouthHouse): string {
+    const name = youthHouse.metadata?.name || youthHouse.title
+    const description = youthHouse.metadata?.description || ''
+    const address = youthHouse.metadata?.address || ''
+    const phone = youthHouse.metadata?.phone || ''
+    const email = youthHouse.metadata?.email || ''
+    const website = youthHouse.metadata?.website || ''
+    const imageUrl = youthHouse.metadata?.featured_image?.imgix_url
+
+    return `
+      <div class="popup-content">
+        ${imageUrl ? `<img src="${imageUrl}?w=300&h=200&fit=crop&auto=format,compress" alt="${name}" class="popup-image" />` : ''}
+        <div class="popup-text">
+          <h3 class="popup-title">${name}</h3>
+          ${description ? `<p class="popup-description">${description.replace(/<[^>]*>/g, '').slice(0, 100)}...</p>` : ''}
+          ${address ? `<p class="popup-address"><strong>📍</strong> ${address.split('\n')[0]}</p>` : ''}
+          <div class="popup-actions">
+            ${phone ? `<a href="tel:${phone}" class="popup-link">📞 Call</a>` : ''}
+            ${email ? `<a href="mailto:${email}" class="popup-link">✉️ Email</a>` : ''}
+            ${website ? `<a href="${website}" target="_blank" rel="noopener noreferrer" class="popup-link">🌐 Website</a>` : ''}
+            <a href="/youth-houses/${youthHouse.slug}" class="popup-link popup-link-primary">View Details</a>
+          </div>
+        </div>
+      </div>
+    `
+  }
 
   return (
-    <div className="relative">
+    <div className="relative w-full h-96 md:h-[500px] rounded-2xl overflow-hidden shadow-xl">
       <div 
-        ref={mapRef} 
-        className="w-full h-96 md:h-[500px] lg:h-[600px] rounded-xl shadow-2xl overflow-hidden"
+        ref={mapContainerRef} 
+        className="w-full h-full"
+        style={{ minHeight: '400px' }}
       />
       
-      {!isMapLoaded && (
-        <div className="absolute inset-0 bg-gray-100 rounded-xl flex items-center justify-center">
+      {!isLoaded && (
+        <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
           <div className="text-center">
-            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-600 font-medium">Loading interactive map...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading map...</p>
           </div>
         </div>
       )}
 
-      {youthHouses.length === 0 && isMapLoaded && (
-        <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg max-w-xs">
-          <p className="text-sm text-gray-600">
-            No youth houses available to display on the map.
-          </p>
-        </div>
-      )}
+      {/* Custom CSS - removing jsx prop and using dangerouslySetInnerHTML */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          .custom-marker {
+            position: relative;
+            cursor: pointer;
+            transform: translate(-12px, -24px);
+          }
+          
+          .marker-pulse {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 107, 53, 0.3);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+          }
+          
+          .marker-content {
+            position: relative;
+            z-index: 1;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+            transition: transform 0.2s ease;
+          }
+          
+          .custom-marker:hover .marker-content {
+            transform: scale(1.1);
+          }
+          
+          @keyframes pulse {
+            0% {
+              transform: translate(-50%, -50%) scale(0);
+              opacity: 1;
+            }
+            100% {
+              transform: translate(-50%, -50%) scale(1);
+              opacity: 0;
+            }
+          }
 
-      <style jsx>{`
-        :global(.custom-popup .leaflet-popup-content-wrapper) {
-          border-radius: 12px;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-        }
-        
-        :global(.custom-popup .leaflet-popup-tip) {
-          background: white;
-        }
-        
-        :global(.line-clamp-3) {
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-      `}</style>
+          .mapboxgl-popup-content {
+            padding: 0;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            max-width: 350px;
+          }
+
+          .popup-content {
+            border-radius: 12px;
+            overflow: hidden;
+          }
+
+          .popup-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+          }
+
+          .popup-text {
+            padding: 16px;
+          }
+
+          .popup-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2D3436;
+            margin: 0 0 8px 0;
+          }
+
+          .popup-description {
+            font-size: 14px;
+            color: #636e72;
+            margin: 0 0 12px 0;
+            line-height: 1.4;
+          }
+
+          .popup-address {
+            font-size: 13px;
+            color: #636e72;
+            margin: 0 0 12px 0;
+          }
+
+          .popup-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
+          .popup-link {
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            text-decoration: none;
+            background: #f8f9fa;
+            color: #2D3436;
+            border: 1px solid #e9ecef;
+            transition: all 0.2s ease;
+          }
+
+          .popup-link:hover {
+            background: #e9ecef;
+            transform: translateY(-1px);
+          }
+
+          .popup-link-primary {
+            background: #FF6B35;
+            color: white;
+            border-color: #FF6B35;
+          }
+
+          .popup-link-primary:hover {
+            background: #e55a2b;
+            color: white;
+          }
+
+          .mapboxgl-popup-close-button {
+            color: #2D3436;
+            font-size: 20px;
+            font-weight: bold;
+            right: 8px;
+            top: 8px;
+          }
+        `
+      }} />
     </div>
   )
 }
